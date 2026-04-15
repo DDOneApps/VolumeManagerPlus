@@ -13,12 +13,14 @@ import androidx.compose.runtime.setValue
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import moe.chensi.volume.data.App
+import moe.chensi.volume.data.BubblePreferences
 import moe.chensi.volume.data.AppPreferencesStore
 import moe.chensi.volume.system.AudioPlaybackConfigurationProxy
 import moe.chensi.volume.system.PackageManagerProxy
 import org.joor.Reflect
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuProvider
+import kotlin.math.roundToInt
 
 @SuppressLint("PrivateApi")
 class Manager(context: Context, dataStore: DataStore<Preferences>) {
@@ -46,6 +48,9 @@ class Manager(context: Context, dataStore: DataStore<Preferences>) {
     private val packageManager by lazy { PackageManagerProxy.get(context) }
 
     private val appPreferencesStore = AppPreferencesStore(dataStore)
+    private var _bubblePreferences by mutableStateOf(appPreferencesStore.bubble)
+    val bubblePreferences: BubblePreferences
+        get() = _bubblePreferences
 
     val apps = mutableStateMapOf<String, App>()
 
@@ -155,6 +160,8 @@ class Manager(context: Context, dataStore: DataStore<Preferences>) {
 
     private fun start() {
         appPreferencesStore.track { first ->
+            _bubblePreferences = appPreferencesStore.bubble
+
             for ((packageName, index) in appPreferencesStore.indices) {
                 if (!first) {
                     // Replace with new reference
@@ -166,5 +173,31 @@ class Manager(context: Context, dataStore: DataStore<Preferences>) {
                 initialize()
             }
         }
+    }
+
+    fun setBubbleSizeScale(value: Float) {
+        val normalized = ((value.coerceIn(0.7f, 1.8f) * 100f).roundToInt() / 100f)
+        val next = _bubblePreferences.copy(sizeScale = normalized)
+        if (next == _bubblePreferences) {
+            return
+        }
+
+        _bubblePreferences = next
+        appPreferencesStore.setBubble(next)
+    }
+
+    fun setBubblePosition(horizontal: Float, vertical: Float) {
+        val normalizedHorizontal = ((horizontal.coerceIn(0f, 1f) * 100f).roundToInt() / 100f)
+        val normalizedVertical = ((vertical.coerceIn(0f, 1f) * 100f).roundToInt() / 100f)
+        val next = _bubblePreferences.copy(
+            horizontal = normalizedHorizontal,
+            vertical = normalizedVertical
+        )
+        if (next == _bubblePreferences) {
+            return
+        }
+
+        _bubblePreferences = next
+        appPreferencesStore.setBubble(next)
     }
 }

@@ -4,7 +4,7 @@ import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityButtonController.AccessibilityButtonCallback
 import android.accessibilityservice.AccessibilityService
 import android.animation.Animator
-import android.animation.ValueAnimator
+import android.animation.AnimatorListenerAdapter
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -25,14 +25,21 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.AbstractComposeView
@@ -46,120 +53,104 @@ import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import moe.chensi.volume.compose.AppVolumeList
 import moe.chensi.volume.compose.StreamVolumeSlider
-import moe.chensi.volume.compose.VolumeChangeObserver
 import moe.chensi.volume.system.ActivityTaskManagerProxy
 import moe.chensi.volume.ui.theme.VolumeManagerTheme
 import org.joor.Reflect
 import java.util.Objects
+import kotlin.math.roundToInt
 
 @SuppressLint("AccessibilityPolicy")
 class Service : AccessibilityService() {
     companion object {
         const val ACTION_SHOW_VIEW = "moe.chensi.volume.ACTION_SHOW_VIEW"
+        const val ACTION_BUBBLE_SETTINGS_CHANGED = "moe.chensi.volume.ACTION_BUBBLE_SETTINGS_CHANGED"
 
         private const val TAG = "VolumeManager.Service"
+        private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
 
-        private const val ANIMATION_DURATION = 300L
-
-        private const val IDLE_TIMEOUT = 5000L
-        private const val AUTO_REPEAT_DELAY = 100L
-        private const val AUTO_REPEAT_INITIAL_DELAY = 500L
+        private const val OVERLAY_IDLE_TIMEOUT = 5000L
+        private const val BUBBLE_IDLE_TIMEOUT = 2000L
+        private const val ANIMATION_DURATION = 220L
+        private const val BASE_BUBBLE_SIZE_DP = 44f
     }
 
     private val windowManager: WindowManager by lazy {
-        Objects.requireNonNull(
-            getSystemService(
-                WindowManager::class.java
-            )!!
-        )
+        Objects.requireNonNull(getSystemService(WindowManager::class.java)!!)
     }
     private lateinit var manager: Manager
+    val activityTaskManager by lazy { ActivityTaskManagerProxy(this) }
 
-    private val handler = object : Handler(Looper.getMainLooper()) {
-        fun hideView() {
-            if (viewVisible) {
-                Log.i(TAG, "animate out")
-                animateAlpha(layoutParams.alpha, 0f, ANIMATION_DURATION) {
-                    if (!viewVisible) {
-                        Log.i(TAG, "remove view")
-                        view!!.background = null
-                        lifecycle?.currentState = Lifecycle.State.DESTROYED
-                        windowManager.removeView(view)
-                        view = null
-                    }
-                }
-                viewVisible = false
-            }
-        }
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val hideOverlayRunnable = Runnable { hideOverlay() }
+    private val hideBubbleRunnable = Runnable { hideBubble() }
 
-        private val hideViewRunnable = Runnable(::hideView)
+    private var overlayView: View? = null
+    private var overlayVisible = false
+    private var overlayLifecycle: LifecycleRegistry? = null
 
-        fun startIdleTimer() {
-            removeCallbacks(hideViewRunnable)
-            postDelayed(hideViewRunnable, IDLE_TIMEOUT)
-        }
+    private var bubbleView: View? = null
+    private var bubbleVisible = false
+    private var bubbleLifecycle: LifecycleRegistry? = null
 
-        private var repeatAdjustVolumeDirection = 0
-        private val repeatAdjustVolumeRunnable: Runnable = Runnable {
-            adjustVolume()
-            postDelayed(repeatAdjustVolumeRunnable, AUTO_REPEAT_DELAY)
-        }
-
-        private fun adjustVolume() {
-            manager.audioManager.adjustSuggestedStreamVolume(
-                repeatAdjustVolumeDirection, AudioManager.USE_DEFAULT_STREAM_TYPE, 0
-            )
-            VolumeChangeObserver.notifyVolumeChanged()
-            startIdleTimer()
-        }
-
-        fun startRepeatAdjustVolume(direction: Int) {
-            repeatAdjustVolumeDirection = direction
-            if (view != null) {
-                adjustVolume()
-            }
-            postDelayed(repeatAdjustVolumeRunnable, AUTO_REPEAT_INITIAL_DELAY)
-        }
-
-        fun stopRepeatAdjustVolume() {
-            removeCallbacks(repeatAdjustVolumeRunnable)
-            startIdleTimer()
+    private val overlayLayoutParams by lazy {
+        WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER
         }
     }
 
-    private var lifecycle: LifecycleRegistry? = null
+    private val bubbleLayoutParams by lazy {
+        WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+        }
+    }
 
-    private fun createView(): View {
+    private fun installViewOwners(
+        view: AbstractComposeView,
+        onLifecycleCreated: (LifecycleRegistry) -> Unit
+    ) {
+        val owner = object : SavedStateRegistryOwner {
+            private val lifecycleRegistry = LifecycleRegistry(this)
+            private val savedStateRegistryController = SavedStateRegistryController.create(this)
+
+            init {
+                savedStateRegistryController.performRestore(null)
+                lifecycleRegistry.currentState = Lifecycle.State.STARTED
+                onLifecycleCreated(lifecycleRegistry)
+            }
+
+            override val lifecycle: Lifecycle
+                get() = lifecycleRegistry
+
+            override val savedStateRegistry: SavedStateRegistry
+                get() = savedStateRegistryController.savedStateRegistry
+        }
+
+        view.setViewTreeLifecycleOwner(owner)
+        view.setViewTreeSavedStateRegistryOwner(owner)
+    }
+
+    private fun createOverlayView(): View {
         return object : AbstractComposeView(this) {
             init {
-                val owner = object : SavedStateRegistryOwner {
-                    private val lifecycleRegistry = LifecycleRegistry(this)
-
-                    private val savedStateRegistryController =
-                        SavedStateRegistryController.create(this)
-
-                    init {
-                        savedStateRegistryController.performRestore(null)
-                        lifecycleRegistry.currentState = Lifecycle.State.STARTED
-                        this@Service.lifecycle = lifecycleRegistry
-                    }
-
-                    override val lifecycle: Lifecycle
-                        get() = lifecycleRegistry
-
-                    override val savedStateRegistry: SavedStateRegistry
-                        get() = savedStateRegistryController.savedStateRegistry
-                }
-
-                setViewTreeLifecycleOwner(owner)
-                setViewTreeSavedStateRegistryOwner(owner)
+                installViewOwners(this) { lifecycle -> overlayLifecycle = lifecycle }
             }
 
             override fun onAttachedToWindow() {
                 super.onAttachedToWindow()
 
-                Log.i(TAG, "onAttachedToWindow manufacturer: ${Build.MANUFACTURER}")
-
+                Log.i(TAG, "overlay attached manufacturer: ${Build.MANUFACTURER}")
                 @Suppress("SpellCheckingInspection")
                 if (windowManager.isCrossWindowBlurEnabled && isHardwareAccelerated && Build.MANUFACTURER != "realme") {
                     background =
@@ -169,39 +160,31 @@ class Service : AccessibilityService() {
                         }.get()
                 }
 
-                this@Service.handler.startIdleTimer()
+                startOverlayIdleTimer()
             }
 
             @SuppressLint("ClickableViewAccessibility")
             override fun onTouchEvent(event: MotionEvent): Boolean {
-                Log.i(TAG, "onTouchEvent ${event.actionMasked}")
-
                 if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-                    this@Service.handler.hideView()
+                    hideOverlay()
                     return true
                 }
-
                 return super.onTouchEvent(event)
             }
 
             @Composable
             override fun Content() {
-                return VolumeManagerTheme {
-                    Surface(
-                        color = Color.Transparent,
-                        contentColor = Color.White,
-                    ) {
+                VolumeManagerTheme {
+                    Surface(color = Color.Transparent, contentColor = Color.White) {
                         Column(
                             modifier = Modifier
-                                .background(
-                                    Color(1f, 1f, 1f, 0.3f), RoundedCornerShape(40f)
-                                )
+                                .background(Color(1f, 1f, 1f, 0.3f), RoundedCornerShape(40f))
                                 .padding(20.dp, 16.dp)
                         ) {
                             AppVolumeList(
                                 apps = manager.apps.values,
                                 showAll = false,
-                                onChange = this@Service.handler::startIdleTimer
+                                onChange = ::startOverlayIdleTimer
                             ) {
                                 item(AudioManager.STREAM_MUSIC) {
                                     StreamVolumeSlider(
@@ -209,7 +192,7 @@ class Service : AccessibilityService() {
                                         Icons.Default.MusicNote,
                                         "Music",
                                         manager.audioManager,
-                                        onChange = this@Service.handler::startIdleTimer
+                                        onChange = ::startOverlayIdleTimer
                                     )
                                 }
 
@@ -219,7 +202,7 @@ class Service : AccessibilityService() {
                                         Icons.Default.Notifications,
                                         "Notifications",
                                         manager.audioManager,
-                                        onChange = this@Service.handler::startIdleTimer
+                                        onChange = ::startOverlayIdleTimer
                                     )
                                 }
                             }
@@ -230,87 +213,212 @@ class Service : AccessibilityService() {
         }
     }
 
-    private val layoutParams by lazy {
-        WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT, // Width
-            WindowManager.LayoutParams.WRAP_CONTENT, // Height
-            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT // Make the background translucent
-        ).apply {
-            gravity = Gravity.CENTER // Center the view
-        }
-    }
-
-    private var view: View? = null
-    private var viewVisible = false
-
-    private fun showView() {
-        if (view == null) {
-            Log.i(TAG, "add view")
-            // The view doesn't respond to input events if reused
-            view = createView()
-            layoutParams.alpha = 0f
-            windowManager.addView(view, layoutParams)
-        }
-
-        if (!viewVisible) {
-            Log.i(TAG, "animate in")
-            animateAlpha(layoutParams.alpha, 1f, ANIMATION_DURATION)
-            viewVisible = true
-        }
-
-        handler.startIdleTimer()
-    }
-
-    private var currentAnimator: ValueAnimator? = null
-
-    private fun animateAlpha(from: Float, to: Float, duration: Long, onEnd: (() -> Unit)? = null) {
-        currentAnimator?.cancel()
-
-        val animator = ValueAnimator.ofFloat(from, to)
-        animator.duration = duration
-        animator.interpolator = AccelerateDecelerateInterpolator()
-
-        animator.addUpdateListener { animation ->
-            if (view != null) {
-                layoutParams.alpha = animation.animatedValue as Float
-                windowManager.updateViewLayout(view, layoutParams)
+    private fun createBubbleView(): View {
+        return object : AbstractComposeView(this) {
+            init {
+                installViewOwners(this) { lifecycle -> bubbleLifecycle = lifecycle }
             }
-        }
 
-        animator.addListener(object : Animator.AnimatorListener {
-            var canceled = false
-
-            override fun onAnimationStart(animation: Animator) {}
-
-            override fun onAnimationEnd(animation: Animator) {
-                if (canceled) {
-                    return
+            @Composable
+            override fun Content() {
+                VolumeManagerTheme {
+                    Surface(
+                        shape = CircleShape,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
+                        shadowElevation = 8.dp,
+                        tonalElevation = 4.dp,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable {
+                                showOverlay()
+                            }
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Tune,
+                                contentDescription = "Open volume manager"
+                            )
+                        }
+                    }
                 }
+            }
+        }
+    }
 
-                layoutParams.alpha = to
-                windowManager.updateViewLayout(view, layoutParams)
+    private fun animateIn(view: View) {
+        view.animate().cancel()
+        view.alpha = 0f
+        view.scaleX = 0.9f
+        view.scaleY = 0.9f
+        view.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(ANIMATION_DURATION)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .setListener(null)
+            .start()
+    }
 
-                onEnd?.invoke()
+    private fun animateOut(view: View, onEnd: () -> Unit) {
+        view.animate().cancel()
+        view.animate()
+            .alpha(0f)
+            .scaleX(0.9f)
+            .scaleY(0.9f)
+            .setDuration(ANIMATION_DURATION)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    onEnd()
+                }
+            })
+            .start()
+    }
+
+    private fun startOverlayIdleTimer() {
+        mainHandler.removeCallbacks(hideOverlayRunnable)
+        mainHandler.postDelayed(hideOverlayRunnable, OVERLAY_IDLE_TIMEOUT)
+    }
+
+    private fun startBubbleIdleTimer() {
+        mainHandler.removeCallbacks(hideBubbleRunnable)
+        mainHandler.postDelayed(hideBubbleRunnable, BUBBLE_IDLE_TIMEOUT)
+    }
+
+    private fun showOverlay() {
+        hideBubble()
+
+        if (overlayView == null) {
+            overlayView = createOverlayView()
+            windowManager.addView(overlayView, overlayLayoutParams)
+        }
+
+        if (!overlayVisible) {
+            overlayVisible = true
+            animateIn(overlayView!!)
+        }
+
+        startOverlayIdleTimer()
+    }
+
+    private fun hideOverlay() {
+        if (!overlayVisible) {
+            return
+        }
+
+        overlayVisible = false
+        mainHandler.removeCallbacks(hideOverlayRunnable)
+
+        val target = overlayView ?: return
+        animateOut(target) {
+            if (overlayVisible) {
+                return@animateOut
             }
 
-            override fun onAnimationCancel(animation: Animator) {
-                canceled = true
+            try {
+                target.background = null
+                overlayLifecycle?.currentState = Lifecycle.State.DESTROYED
+                windowManager.removeView(target)
+            } catch (_: Exception) {
+            } finally {
+                overlayView = null
+                overlayLifecycle = null
+            }
+        }
+    }
+
+    private fun updateBubbleLayout() {
+        val preferences = manager.bubblePreferences
+        val density = resources.displayMetrics.density
+        val sizePx = (BASE_BUBBLE_SIZE_DP * preferences.sizeScale * density).roundToInt()
+            .coerceAtLeast((28f * density).roundToInt())
+
+        val width = resources.displayMetrics.widthPixels
+        val height = resources.displayMetrics.heightPixels
+        bubbleLayoutParams.width = sizePx
+        bubbleLayoutParams.height = sizePx
+        bubbleLayoutParams.x = ((width - sizePx).coerceAtLeast(0) * preferences.horizontal).roundToInt()
+        bubbleLayoutParams.y = ((height - sizePx).coerceAtLeast(0) * preferences.vertical).roundToInt()
+
+        val target = bubbleView
+        if (target != null) {
+            windowManager.updateViewLayout(target, bubbleLayoutParams)
+        }
+    }
+
+    private fun showBubble() {
+        if (overlayVisible) {
+            startOverlayIdleTimer()
+            return
+        }
+
+        updateBubbleLayout()
+
+        if (bubbleView == null) {
+            bubbleView = createBubbleView()
+            windowManager.addView(bubbleView, bubbleLayoutParams)
+        }
+
+        if (!bubbleVisible) {
+            bubbleVisible = true
+            animateIn(bubbleView!!)
+        }
+
+        startBubbleIdleTimer()
+    }
+
+    private fun hideBubble() {
+        if (!bubbleVisible) {
+            return
+        }
+
+        bubbleVisible = false
+        mainHandler.removeCallbacks(hideBubbleRunnable)
+
+        val target = bubbleView ?: return
+        animateOut(target) {
+            if (bubbleVisible) {
+                return@animateOut
             }
 
-            override fun onAnimationRepeat(animation: Animator) {}
-        })
+            try {
+                bubbleLifecycle?.currentState = Lifecycle.State.DESTROYED
+                windowManager.removeView(target)
+            } catch (_: Exception) {
+            } finally {
+                bubbleView = null
+                bubbleLifecycle = null
+            }
+        }
+    }
 
-        animator.start()
-        currentAnimator = animator
+    private fun shouldIgnoreForegroundTaskVolumeKeys(): Boolean {
+        val task = activityTaskManager.getForegroundTask()
+        if (task != null) {
+            val app = manager.apps[task.app]
+            if (app != null && app.disableVolumeButtons) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private val accessibilityButtonCallback = object : AccessibilityButtonCallback() {
+        override fun onClicked(controller: AccessibilityButtonController?) {
+            if (manager.shizukuStatus == Manager.ShizukuStatus.Connected) {
+                showOverlay()
+            }
+        }
     }
 
     private val broadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            Log.i(TAG, "onReceive ${intent.action}")
-            if (intent.action == ACTION_SHOW_VIEW) {
-                showView()
+            when (intent.action) {
+                ACTION_SHOW_VIEW -> showOverlay()
+                ACTION_BUBBLE_SETTINGS_CHANGED -> updateBubbleLayout()
+                VOLUME_CHANGED_ACTION -> if (bubbleVisible) startBubbleIdleTimer()
             }
         }
     }
@@ -321,22 +429,19 @@ class Service : AccessibilityService() {
         val application = super.getApplication() as MyApplication
         manager = application.manager
 
-        accessibilityButtonController.registerAccessibilityButtonCallback(object :
-            AccessibilityButtonCallback() {
-            override fun onClicked(controller: AccessibilityButtonController?) {
-                if (manager.shizukuStatus == Manager.ShizukuStatus.Connected) {
-                    showView()
-                }
-            }
-        })
+        accessibilityButtonController.registerAccessibilityButtonCallback(accessibilityButtonCallback)
 
-        registerReceiver(broadcastReceiver, IntentFilter(ACTION_SHOW_VIEW), RECEIVER_NOT_EXPORTED)
+        val filter = IntentFilter().apply {
+            addAction(ACTION_SHOW_VIEW)
+            addAction(ACTION_BUBBLE_SETTINGS_CHANGED)
+            addAction(VOLUME_CHANGED_ACTION)
+        }
+        registerReceiver(broadcastReceiver, filter, RECEIVER_NOT_EXPORTED)
 
         Log.i(TAG, "onServiceConnected done ${serviceInfo.capabilities.toString(2)}")
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent) {
-    }
+    override fun onAccessibilityEvent(event: AccessibilityEvent) {}
 
     override fun onInterrupt() {
         Log.i(TAG, "onInterrupt")
@@ -346,56 +451,38 @@ class Service : AccessibilityService() {
         super.onDestroy()
 
         Log.i(TAG, "onDestroy")
-
         Toast.makeText(this, "Accessibility service died!", Toast.LENGTH_SHORT).show()
 
+        mainHandler.removeCallbacks(hideOverlayRunnable)
+        mainHandler.removeCallbacks(hideBubbleRunnable)
+        hideOverlay()
+        hideBubble()
+
+        try {
+            accessibilityButtonController.unregisterAccessibilityButtonCallback(accessibilityButtonCallback)
+        } catch (_: Exception) {
+        }
         unregisterReceiver(broadcastReceiver)
     }
 
-    val activityTaskManager by lazy { ActivityTaskManagerProxy(this) }
-
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        Log.i(
-            TAG,
-            "onKeyEvent action = ${event.action}, key code = ${event.keyCode}, shizuku permission = ${manager.shizukuStatus}"
-        )
-
-        // Only handle `VOLUME_UP` and `VOLUME_DOWN`
         if (event.keyCode != KeyEvent.KEYCODE_VOLUME_UP && event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) {
             return false
         }
 
-        // Ignore if Shizuku is not ready
         if (manager.shizukuStatus != Manager.ShizukuStatus.Connected) {
             return false
         }
 
-        // Check foreground task ignorance list
-        val task = activityTaskManager.getForegroundTask()
-        Log.i(TAG, "onKeyEvent foreground task: $task")
-
-        if (task != null) {
-            val app = manager.apps[task.app]
-            if (app != null && app.disableVolumeButtons) {
-                return false
-            }
+        if (shouldIgnoreForegroundTaskVolumeKeys()) {
+            return false
         }
 
-        when (event.action) {
-            KeyEvent.ACTION_DOWN -> {
-                handler.startRepeatAdjustVolume(
-                    if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
-                        AudioManager.ADJUST_RAISE
-                    } else {
-                        AudioManager.ADJUST_LOWER
-                    }
-                )
-                showView()
-            }
-
-            KeyEvent.ACTION_UP -> handler.stopRepeatAdjustVolume()
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            showBubble()
         }
 
-        return true
+        // Let the system handle the key so Android's default slider stays visible.
+        return false
     }
 }

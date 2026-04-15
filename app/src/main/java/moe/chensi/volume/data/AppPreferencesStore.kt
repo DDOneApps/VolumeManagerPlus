@@ -21,7 +21,9 @@ class AppPreferencesStore(private val dataStore: DataStore<Preferences>) {
 
     @Serializable
     private data class SerializedState(
-        val values: MutableList<AppPreferences>, val indices: MutableMap<String, Int>
+        val values: MutableList<AppPreferences>,
+        val indices: MutableMap<String, Int>,
+        var bubble: BubblePreferences = BubblePreferences()
     )
 
     private var state = SerializedState(mutableListOf(), mutableMapOf())
@@ -29,6 +31,8 @@ class AppPreferencesStore(private val dataStore: DataStore<Preferences>) {
         get() = state.values
     val indices: Map<String, Int>
         get() = state.indices
+    val bubble: BubblePreferences
+        get() = synchronized(state) { state.bubble.copy() }
 
     fun track(onChange: (first: Boolean) -> Unit) {
         var first = true
@@ -67,5 +71,12 @@ class AppPreferencesStore(private val dataStore: DataStore<Preferences>) {
                 preferences[key] = Json.encodeToString(state)
             }
         }
+    }
+
+    fun setBubble(value: BubblePreferences) {
+        synchronized(state) {
+            state.bubble = value
+        }
+        save()
     }
 }

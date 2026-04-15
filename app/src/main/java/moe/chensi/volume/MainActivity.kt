@@ -57,6 +57,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import moe.chensi.volume.compose.AppVolumeList
+import moe.chensi.volume.compose.BubbleSettingsCard
 import moe.chensi.volume.compose.CrashReportDialog
 import moe.chensi.volume.compose.ToggleButton
 import moe.chensi.volume.ui.theme.VolumeManagerTheme
@@ -291,8 +292,23 @@ class MainActivity : ComponentActivity() {
                             Manager.ShizukuStatus.Connected -> {
                                 ServiceStatus()
 
+                                val bubblePreferences = manager.bubblePreferences
+                                BubbleSettingsCard(
+                                    sizeScale = bubblePreferences.sizeScale,
+                                    horizontal = bubblePreferences.horizontal,
+                                    vertical = bubblePreferences.vertical,
+                                    onSizeScaleChange = {
+                                        manager.setBubbleSizeScale(it)
+                                        notifyBubbleSettingsChanged()
+                                    },
+                                    onPositionChange = { horizontal, vertical ->
+                                        manager.setBubblePosition(horizontal, vertical)
+                                        notifyBubbleSettingsChanged()
+                                    }
+                                )
+
                                 AppVolumeList(
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier.weight(1f),
                                     contentPadding = PaddingValues(bottom = 16.dp),
                                     apps = manager.apps.values,
                                     showEmpty = true,
@@ -323,6 +339,10 @@ class MainActivity : ComponentActivity() {
         )
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(intent)
+    }
+
+    private fun notifyBubbleSettingsChanged() {
+        sendBroadcast(Intent(Service.ACTION_BUBBLE_SETTINGS_CHANGED).setPackage(packageName))
     }
 
     @Composable
