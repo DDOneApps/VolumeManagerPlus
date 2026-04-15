@@ -24,7 +24,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
@@ -46,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +74,11 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "VolumeManager.Activity"
 
         private const val SERVICE_NAME_SEPARATOR = ":"
+    }
+
+    private enum class Page {
+        Main,
+        BubbleSettings
     }
 
     private lateinit var application: MyApplication
@@ -150,10 +158,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             var showAll by remember { mutableStateOf(false) }
             var crashReport by remember { mutableStateOf<String?>(null) }
+            var currentPage by rememberSaveable { mutableStateOf(Page.Main) }
 
             LaunchedEffect(showCrashReport) {
                 if (showCrashReport) {
                     crashReport = CrashHandler.readCrashReport()
+                }
+            }
+
+            LaunchedEffect(manager.shizukuStatus) {
+                if (manager.shizukuStatus != Manager.ShizukuStatus.Connected) {
+                    currentPage = Page.Main
                 }
             }
 
@@ -180,36 +195,71 @@ class MainActivity : ComponentActivity() {
             VolumeManagerTheme {
                 Scaffold(
                     modifier = Modifier.fillMaxSize(), topBar = {
-                        TopAppBar(title = { Text("Volume Manager") }, actions = {
-                            if (manager.shizukuStatus == Manager.ShizukuStatus.Connected) {
-                                ToggleButton(
-                                    checked = showAll,
-                                    checkedIcon = Icons.Default.Visibility,
-                                    checkedDescription = "Hide inactive or hidden apps",
-                                    uncheckedIcon = Icons.Default.VisibilityOff,
-                                    uncheckedDescription = "Show all apps"
-                                ) {
-                                    showAll = it
-                                }
-                            }
-
-                            if (BuildConfig.DEBUG) {
-                                TooltipBox(
-                                    positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
-                                        TooltipAnchorPosition.Below, 12.dp
-                                    ),
-                                    tooltip = { PlainTooltip { Text("Trigger a crash for testing") } },
-                                    state = rememberTooltipState()
-                                ) {
-                                    IconButton(onClick = { throw RuntimeException("Test crash triggered from UI") }) {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    if (currentPage == Page.BubbleSettings) {
+                                        "Bubble settings"
+                                    } else {
+                                        "Volume Manager"
+                                    }
+                                )
+                            },
+                            navigationIcon = {
+                                if (currentPage == Page.BubbleSettings) {
+                                    IconButton(onClick = { currentPage = Page.Main }) {
                                         Icon(
-                                            Icons.Default.BugReport,
-                                            contentDescription = stringResource(R.string.test_crash)
+                                            Icons.AutoMirrored.Filled.ArrowBack,
+                                            contentDescription = "Back"
                                         )
                                     }
                                 }
-                            }
-                        })
+                            },
+                            actions = {
+                                if (manager.shizukuStatus == Manager.ShizukuStatus.Connected && currentPage == Page.Main) {
+                                    TooltipBox(
+                                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+                                            TooltipAnchorPosition.Below, 12.dp
+                                        ),
+                                        tooltip = { PlainTooltip { Text("Bubble settings") } },
+                                        state = rememberTooltipState()
+                                    ) {
+                                        IconButton(onClick = { currentPage = Page.BubbleSettings }) {
+                                            Icon(
+                                                Icons.Default.Settings,
+                                                contentDescription = "Bubble settings"
+                                            )
+                                        }
+                                    }
+
+                                    ToggleButton(
+                                        checked = showAll,
+                                        checkedIcon = Icons.Default.Visibility,
+                                        checkedDescription = "Hide inactive or hidden apps",
+                                        uncheckedIcon = Icons.Default.VisibilityOff,
+                                        uncheckedDescription = "Show all apps"
+                                    ) {
+                                        showAll = it
+                                    }
+                                }
+
+                                if (BuildConfig.DEBUG) {
+                                    TooltipBox(
+                                        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(
+                                            TooltipAnchorPosition.Below, 12.dp
+                                        ),
+                                        tooltip = { PlainTooltip { Text("Trigger a crash for testing") } },
+                                        state = rememberTooltipState()
+                                    ) {
+                                        IconButton(onClick = { throw RuntimeException("Test crash triggered from UI") }) {
+                                            Icon(
+                                                Icons.Default.BugReport,
+                                                contentDescription = stringResource(R.string.test_crash)
+                                            )
+                                        }
+                                    }
+                                }
+                            })
                     }) { innerPadding ->
                     Column(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -292,28 +342,31 @@ class MainActivity : ComponentActivity() {
                             Manager.ShizukuStatus.Connected -> {
                                 ServiceStatus()
 
-                                val bubblePreferences = manager.bubblePreferences
-                                BubbleSettingsCard(
-                                    sizeScale = bubblePreferences.sizeScale,
-                                    horizontal = bubblePreferences.horizontal,
-                                    vertical = bubblePreferences.vertical,
-                                    onSizeScaleChange = {
-                                        manager.setBubbleSizeScale(it)
-                                        notifyBubbleSettingsChanged()
-                                    },
-                                    onPositionChange = { horizontal, vertical ->
-                                        manager.setBubblePosition(horizontal, vertical)
-                                        notifyBubbleSettingsChanged()
-                                    }
-                                )
-
-                                AppVolumeList(
-                                    modifier = Modifier.weight(1f),
-                                    contentPadding = PaddingValues(bottom = 16.dp),
-                                    apps = manager.apps.values,
-                                    showEmpty = true,
-                                    showAll = showAll,
-                                    onShowAll = { showAll = true })
+                                if (currentPage == Page.BubbleSettings) {
+                                    val bubblePreferences = manager.bubblePreferences
+                                    BubbleSettingsCard(
+                                        sizeScale = bubblePreferences.sizeScale,
+                                        horizontal = bubblePreferences.horizontal,
+                                        vertical = bubblePreferences.vertical,
+                                        onSizeScaleChange = {
+                                            manager.setBubbleSizeScale(it)
+                                            notifyBubbleSettingsChanged()
+                                        },
+                                        onPositionChange = { horizontal, vertical ->
+                                            manager.setBubblePosition(horizontal, vertical)
+                                            notifyBubbleSettingsChanged()
+                                        }
+                                    )
+                                } else {
+                                    AppVolumeList(
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(bottom = 16.dp),
+                                        apps = manager.apps.values,
+                                        showEmpty = true,
+                                        showAll = showAll,
+                                        onShowAll = { showAll = true }
+                                    )
+                                }
                             }
                         }
                     }

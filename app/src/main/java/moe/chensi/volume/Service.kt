@@ -51,13 +51,13 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import moe.chensi.volume.bubble.calculateBubbleLayout
 import moe.chensi.volume.compose.AppVolumeList
 import moe.chensi.volume.compose.StreamVolumeSlider
 import moe.chensi.volume.system.ActivityTaskManagerProxy
 import moe.chensi.volume.ui.theme.VolumeManagerTheme
 import org.joor.Reflect
 import java.util.Objects
-import kotlin.math.roundToInt
 
 @SuppressLint("AccessibilityPolicy")
 class Service : AccessibilityService() {
@@ -71,7 +71,6 @@ class Service : AccessibilityService() {
         private const val OVERLAY_IDLE_TIMEOUT = 5000L
         private const val BUBBLE_IDLE_TIMEOUT = 2000L
         private const val ANIMATION_DURATION = 220L
-        private const val BASE_BUBBLE_SIZE_DP = 44f
     }
 
     private val windowManager: WindowManager by lazy {
@@ -331,16 +330,20 @@ class Service : AccessibilityService() {
 
     private fun updateBubbleLayout() {
         val preferences = manager.bubblePreferences
-        val density = resources.displayMetrics.density
-        val sizePx = (BASE_BUBBLE_SIZE_DP * preferences.sizeScale * density).roundToInt()
-            .coerceAtLeast((28f * density).roundToInt())
-
         val width = resources.displayMetrics.widthPixels
         val height = resources.displayMetrics.heightPixels
-        bubbleLayoutParams.width = sizePx
-        bubbleLayoutParams.height = sizePx
-        bubbleLayoutParams.x = ((width - sizePx).coerceAtLeast(0) * preferences.horizontal).roundToInt()
-        bubbleLayoutParams.y = ((height - sizePx).coerceAtLeast(0) * preferences.vertical).roundToInt()
+        val layout = calculateBubbleLayout(
+            widthPx = width,
+            heightPx = height,
+            density = resources.displayMetrics.density,
+            sizeScale = preferences.sizeScale,
+            horizontal = preferences.horizontal,
+            vertical = preferences.vertical
+        )
+        bubbleLayoutParams.width = layout.sizePx
+        bubbleLayoutParams.height = layout.sizePx
+        bubbleLayoutParams.x = layout.xPx
+        bubbleLayoutParams.y = layout.yPx
 
         val target = bubbleView
         if (target != null) {

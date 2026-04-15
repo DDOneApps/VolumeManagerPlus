@@ -1,20 +1,23 @@
 package moe.chensi.volume.compose
 
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Card
@@ -26,9 +29,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import moe.chensi.volume.bubble.calculateBubbleLayout
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Composable
@@ -43,48 +49,62 @@ fun BubbleSettingsCard(
     val animatedHorizontal = animateFloatAsState(horizontal, spring(), label = "bubbleHorizontal")
     val animatedVertical = animateFloatAsState(vertical, spring(), label = "bubbleVertical")
 
-    Card {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text("Quick Bubble", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Press volume keys to show a small bubble. Tap it to open the full AppVolMgr overlay.",
-                style = MaterialTheme.typography.bodyMedium
-            )
+    Column(
+        modifier = Modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Card {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Quick Bubble", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "Use this page to tune the bubble that appears with volume keys. Tap the bubble to open the full AppVolMgr overlay.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
 
-            BubblePreview(
-                sizeScale = animatedScale.value,
-                horizontal = animatedHorizontal.value,
-                vertical = animatedVertical.value
-            )
+                BubblePreview(
+                    sizeScale = animatedScale.value,
+                    horizontal = animatedHorizontal.value,
+                    vertical = animatedVertical.value
+                )
+            }
+        }
 
-            SettingSlider(
-                title = "Bubble size",
-                valueText = "${(sizeScale * 100).roundToInt()}%",
-                value = sizeScale,
-                range = 0.7f..1.8f,
-                onValueChange = onSizeScaleChange
-            )
+        Card {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SettingSlider(
+                    title = "Bubble size",
+                    valueText = "${(sizeScale * 100).roundToInt()}%",
+                    value = sizeScale,
+                    range = 0.7f..1.8f,
+                    onValueChange = onSizeScaleChange
+                )
 
-            SettingSlider(
-                title = "Horizontal position",
-                valueText = "${(horizontal * 100).roundToInt()}%",
-                value = horizontal,
-                range = 0f..1f,
-                onValueChange = { onPositionChange(it, vertical) }
-            )
+                SettingSlider(
+                    title = "Horizontal position",
+                    valueText = "${(horizontal * 100).roundToInt()}%",
+                    value = horizontal,
+                    range = 0f..1f,
+                    onValueChange = { onPositionChange(it, vertical) }
+                )
 
-            SettingSlider(
-                title = "Vertical position",
-                valueText = "${(vertical * 100).roundToInt()}%",
-                value = vertical,
-                range = 0f..1f,
-                onValueChange = { onPositionChange(horizontal, it) }
-            )
+                SettingSlider(
+                    title = "Vertical position",
+                    valueText = "${(vertical * 100).roundToInt()}%",
+                    value = vertical,
+                    range = 0f..1f,
+                    onValueChange = { onPositionChange(horizontal, it) }
+                )
+            }
         }
     }
 }
@@ -112,33 +132,57 @@ private fun BubblePreview(
     horizontal: Float,
     vertical: Float
 ) {
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(140.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-    ) {
+    val context = LocalContext.current
+    val displayMetrics = context.resources.displayMetrics
+    val screenAspectRatio =
+        (displayMetrics.heightPixels.toFloat() / displayMetrics.widthPixels.toFloat()).coerceIn(
+            1.4f, 2.6f
+        )
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val density = LocalDensity.current
-        val widthPx = with(density) { maxWidth.toPx() }
-        val heightPx = with(density) { maxHeight.toPx() }
-        val bubbleSizePx = with(density) { (44.dp * sizeScale).toPx() }
-        val x = ((widthPx - bubbleSizePx).coerceAtLeast(0f) * horizontal).roundToInt()
-        val y = ((heightPx - bubbleSizePx).coerceAtLeast(0f) * vertical).roundToInt()
+        val maxWidthPx = with(density) { maxWidth.toPx() }.roundToInt()
+        val maxPreviewHeightPx = with(density) { 420.dp.toPx() }.roundToInt()
+        val widthPx = min(maxWidthPx, (maxPreviewHeightPx / screenAspectRatio).roundToInt())
+        val heightPx = (widthPx * screenAspectRatio).roundToInt()
+        val previewWidthDp = with(density) { widthPx.toDp() }
+        val previewHeightDp = with(density) { heightPx.toDp() }
+
+        val layout = calculateBubbleLayout(
+            widthPx = widthPx,
+            heightPx = heightPx,
+            density = density.density,
+            sizeScale = sizeScale,
+            horizontal = horizontal,
+            vertical = vertical
+        )
 
         Box(
-            modifier = Modifier
-                .offset { IntOffset(x, y) }
-                .size((44.dp * sizeScale).coerceAtLeast(28.dp))
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.secondaryContainer),
+            modifier = Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Tune,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSecondaryContainer
-            )
+            Box(
+                modifier = Modifier
+                    .width(previewWidthDp)
+                    .height(previewHeightDp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .offset { IntOffset(layout.xPx, layout.yPx) }
+                        .size(with(density) { layout.sizePx.toDp() })
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
         }
     }
 }
