@@ -89,6 +89,8 @@ class MainActivity : ComponentActivity() {
 
         private const val SERVICE_NAME_SEPARATOR = ":"
         private const val ACCESSIBILITY_BUTTON_TARGETS_KEY = "accessibility_button_targets"
+        private const val ACCESSIBILITY_SHORTCUT_TARGET_SERVICE_KEY =
+            "accessibility_shortcut_target_service"
     }
 
     private enum class Page {
@@ -149,23 +151,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun disableAccessibilityButtonShortcut(name: String) {
-        val value = Settings.Secure.getString(
-            contentResolver, ACCESSIBILITY_BUTTON_TARGETS_KEY
-        ) ?: return
+    private fun removeAccessibilityTargetFromSetting(settingKey: String, serviceName: String) {
+        val value = Settings.Secure.getString(contentResolver, settingKey) ?: return
         if (value.isBlank()) {
             return
         }
 
         val updated = value.split(SERVICE_NAME_SEPARATOR)
-            .filter { it.isNotBlank() && it != name }
+            .filter { it.isNotBlank() && it != serviceName }
             .joinToString(SERVICE_NAME_SEPARATOR)
 
         if (updated != value) {
-            Settings.Secure.putString(
-                contentResolver, ACCESSIBILITY_BUTTON_TARGETS_KEY, updated
-            )
+            Settings.Secure.putString(contentResolver, settingKey, updated)
         }
+    }
+
+    private fun disableAccessibilityShortcuts(serviceName: String) {
+        removeAccessibilityTargetFromSetting(ACCESSIBILITY_BUTTON_TARGETS_KEY, serviceName)
+        removeAccessibilityTargetFromSetting(
+            ACCESSIBILITY_SHORTCUT_TARGET_SERVICE_KEY,
+            serviceName
+        )
     }
 
     val powerManager by lazy { getSystemService(PowerManager::class.java)!! }
@@ -532,7 +538,7 @@ class MainActivity : ComponentActivity() {
                 val serviceName =
                     ComponentName(this@MainActivity, Service::class.java).flattenToString()
                 enableAccessibilityService(serviceName)
-                disableAccessibilityButtonShortcut(serviceName)
+                disableAccessibilityShortcuts(serviceName)
                 serviceEnabled = true
             } catch (e: Exception) {
                 Log.e(TAG, "Can't enable accessibility service", e)

@@ -42,11 +42,11 @@ android {
     ndkVersion = "29.0.14033849"
 
     defaultConfig {
-        applicationId = "moe.chensi.volume"
+        applicationId = "moe.DDOne.volume"
         minSdk = 33
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.3-beta.14"
+        versionCode = 19
+        versionName = "0.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

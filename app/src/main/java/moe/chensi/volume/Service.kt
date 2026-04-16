@@ -7,6 +7,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -15,6 +16,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -72,6 +74,10 @@ class Service : AccessibilityService() {
 
         private const val TAG = "VolumeManager.Service"
         private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
+        private const val SERVICE_NAME_SEPARATOR = ":"
+        private const val ACCESSIBILITY_BUTTON_TARGETS_KEY = "accessibility_button_targets"
+        private const val ACCESSIBILITY_SHORTCUT_TARGET_SERVICE_KEY =
+            "accessibility_shortcut_target_service"
 
         private const val OVERLAY_IDLE_TIMEOUT = 5000L
         private const val ANIMATION_DURATION = 220L
@@ -355,11 +361,14 @@ class Service : AccessibilityService() {
 
     private fun animateOverlayIn(view: View) {
         view.animate().cancel()
+        view.translationX = 0f
+        view.translationY = 0f
+        view.scaleX = 1f
+        view.scaleY = 1f
+        view.rotation = 0f
         view.alpha = 0f
-        view.translationY = 16f * resources.displayMetrics.density
         view.animate()
             .alpha(1f)
-            .translationY(0f)
             .setDuration(ANIMATION_DURATION)
             .setInterpolator(AccelerateDecelerateInterpolator())
             .setListener(null)
@@ -368,9 +377,13 @@ class Service : AccessibilityService() {
 
     private fun animateOverlayOut(view: View, onEnd: () -> Unit) {
         view.animate().cancel()
+        view.translationX = 0f
+        view.translationY = 0f
+        view.scaleX = 1f
+        view.scaleY = 1f
+        view.rotation = 0f
         view.animate()
             .alpha(0f)
-            .translationY(16f * resources.displayMetrics.density)
             .setDuration(ANIMATION_DURATION)
             .setInterpolator(AccelerateDecelerateInterpolator())
             .setListener(object : AnimatorListenerAdapter() {
@@ -523,6 +536,29 @@ class Service : AccessibilityService() {
         }
     }
 
+    private fun removeAccessibilityTargetFromSetting(settingKey: String, serviceName: String) {
+        val value = Settings.Secure.getString(contentResolver, settingKey) ?: return
+        if (value.isBlank()) {
+            return
+        }
+
+        val updated = value.split(SERVICE_NAME_SEPARATOR)
+            .filter { it.isNotBlank() && it != serviceName }
+            .joinToString(SERVICE_NAME_SEPARATOR)
+
+        if (updated != value) {
+            Settings.Secure.putString(contentResolver, settingKey, updated)
+        }
+    }
+
+    private fun disableAccessibilityShortcuts(serviceName: String) {
+        removeAccessibilityTargetFromSetting(ACCESSIBILITY_BUTTON_TARGETS_KEY, serviceName)
+        removeAccessibilityTargetFromSetting(
+            ACCESSIBILITY_SHORTCUT_TARGET_SERVICE_KEY,
+            serviceName
+        )
+    }
+
     private fun hideBubble() {
         if (!bubbleVisible) {
             return
@@ -637,6 +673,8 @@ class Service : AccessibilityService() {
 
         val application = super.getApplication() as MyApplication
         manager = application.manager
+        val serviceName = ComponentName(this, Service::class.java).flattenToString()
+        disableAccessibilityShortcuts(serviceName)
 
         accessibilityButtonController.registerAccessibilityButtonCallback(accessibilityButtonCallback)
 

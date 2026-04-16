@@ -4,15 +4,15 @@
     "type": "APK",
     "kind": "Directory"
   },
-  "applicationId": "moe.chensi.volume",
+  "applicationId": "moe.DDOne.volume",
   "variantName": "release",
   "elements": [
     {
       "type": "SINGLE",
       "filters": [],
       "attributes": [],
-      "versionCode": 18,
-      "versionName": "0.3-beta.14",
+      "versionCode": 19,
+      "versionName": "0.3",
       "outputFile": "app-release.apk"
     }
   ],
