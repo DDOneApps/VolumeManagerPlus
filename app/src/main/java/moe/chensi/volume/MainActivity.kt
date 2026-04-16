@@ -362,6 +362,8 @@ class MainActivity : ComponentActivity() {
                                         horizontal = bubblePreferences.horizontal,
                                         vertical = bubblePreferences.vertical,
                                         shadowEnabled = bubblePreferences.shadowEnabled,
+                                        closeDelayMs = bubblePreferences.closeDelayMs,
+                                        animationStyle = bubblePreferences.animationStyle,
                                         onSizeScaleChange = {
                                             manager.setBubbleSizeScale(it)
                                             notifyBubbleSettingsChanged()
@@ -372,6 +374,14 @@ class MainActivity : ComponentActivity() {
                                         },
                                         onShadowEnabledChange = {
                                             manager.setBubbleShadowEnabled(it)
+                                            notifyBubbleSettingsChanged()
+                                        },
+                                        onCloseDelayChange = {
+                                            manager.setBubbleCloseDelayMs(it)
+                                            notifyBubbleSettingsChanged()
+                                        },
+                                        onAnimationStyleChange = {
+                                            manager.setBubbleAnimationStyle(it)
                                             notifyBubbleSettingsChanged()
                                         }
                                     )

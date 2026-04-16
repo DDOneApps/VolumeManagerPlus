@@ -55,6 +55,7 @@ import moe.chensi.volume.bubble.BUBBLE_SHADOW_PADDING_DP
 import moe.chensi.volume.bubble.calculateBubbleLayout
 import moe.chensi.volume.compose.AppVolumeList
 import moe.chensi.volume.compose.StreamVolumeSlider
+import moe.chensi.volume.data.BubbleAnimationStyle
 import moe.chensi.volume.system.ActivityTaskManagerProxy
 import moe.chensi.volume.ui.theme.VolumeManagerTheme
 import org.joor.Reflect
@@ -73,7 +74,6 @@ class Service : AccessibilityService() {
         private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
 
         private const val OVERLAY_IDLE_TIMEOUT = 5000L
-        private const val BUBBLE_IDLE_TIMEOUT = 2000L
         private const val ANIMATION_DURATION = 220L
     }
 
@@ -304,7 +304,8 @@ class Service : AccessibilityService() {
         }
 
         mainHandler.removeCallbacks(hideBubbleRunnable)
-        mainHandler.postDelayed(hideBubbleRunnable, BUBBLE_IDLE_TIMEOUT)
+        val delayMs = manager.bubblePreferences.closeDelayMs.coerceIn(300L, 15000L)
+        mainHandler.postDelayed(hideBubbleRunnable, delayMs)
     }
 
     private fun showOverlay() {
@@ -399,10 +400,99 @@ class Service : AccessibilityService() {
 
         if (!bubbleVisible) {
             bubbleVisible = true
-            animateIn(bubbleView!!)
+            animateBubbleIn(bubbleView!!)
         }
 
         startBubbleIdleTimer()
+    }
+
+    private fun animateBubbleIn(view: View) {
+        view.animate().cancel()
+        view.translationX = 0f
+        view.rotation = 0f
+
+        when (manager.bubblePreferences.animationStyle) {
+            BubbleAnimationStyle.Default -> {
+                view.alpha = 0f
+                view.scaleX = 0.9f
+                view.scaleY = 0.9f
+                view.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(ANIMATION_DURATION)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .setListener(null)
+                    .start()
+            }
+
+            BubbleAnimationStyle.SlideInLeft -> {
+                view.alpha = 0f
+                view.scaleX = 1f
+                view.scaleY = 1f
+                view.translationX = -80f * resources.displayMetrics.density
+                view.animate()
+                    .alpha(1f)
+                    .translationX(0f)
+                    .setDuration(ANIMATION_DURATION)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .setListener(null)
+                    .start()
+            }
+
+            BubbleAnimationStyle.SlideInRight -> {
+                view.alpha = 0f
+                view.scaleX = 1f
+                view.scaleY = 1f
+                view.translationX = 80f * resources.displayMetrics.density
+                view.animate()
+                    .alpha(1f)
+                    .translationX(0f)
+                    .setDuration(ANIMATION_DURATION)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .setListener(null)
+                    .start()
+            }
+
+            BubbleAnimationStyle.Scale -> {
+                view.alpha = 1f
+                view.scaleX = 0.6f
+                view.scaleY = 0.6f
+                view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(ANIMATION_DURATION)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .setListener(null)
+                    .start()
+            }
+
+            BubbleAnimationStyle.Fade -> {
+                view.alpha = 0f
+                view.scaleX = 1f
+                view.scaleY = 1f
+                view.animate()
+                    .alpha(1f)
+                    .setDuration(ANIMATION_DURATION)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .setListener(null)
+                    .start()
+            }
+
+            BubbleAnimationStyle.Rotate -> {
+                view.alpha = 0f
+                view.scaleX = 1f
+                view.scaleY = 1f
+                view.rotation = -35f
+                view.animate()
+                    .alpha(1f)
+                    .rotation(0f)
+                    .setDuration(ANIMATION_DURATION)
+                    .setInterpolator(AccelerateDecelerateInterpolator())
+                    .setListener(null)
+                    .start()
+            }
+        }
     }
 
     private fun hideBubble() {
@@ -414,9 +504,9 @@ class Service : AccessibilityService() {
         mainHandler.removeCallbacks(hideBubbleRunnable)
 
         val target = bubbleView ?: return
-        animateOut(target) {
+        animateBubbleOut(target) {
             if (bubbleVisible) {
-                return@animateOut
+                return@animateBubbleOut
             }
 
             try {
@@ -428,6 +518,47 @@ class Service : AccessibilityService() {
                 bubbleLifecycle = null
             }
         }
+    }
+
+    private fun animateBubbleOut(view: View, onEnd: () -> Unit) {
+        view.animate().cancel()
+
+        val animation = view.animate()
+            .setDuration(ANIMATION_DURATION)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    onEnd()
+                }
+            })
+
+        when (manager.bubblePreferences.animationStyle) {
+            BubbleAnimationStyle.Default -> {
+                animation.alpha(0f).scaleX(0.9f).scaleY(0.9f)
+            }
+
+            BubbleAnimationStyle.SlideInLeft -> {
+                animation.alpha(0f).translationX(-80f * resources.displayMetrics.density)
+            }
+
+            BubbleAnimationStyle.SlideInRight -> {
+                animation.alpha(0f).translationX(80f * resources.displayMetrics.density)
+            }
+
+            BubbleAnimationStyle.Scale -> {
+                animation.scaleX(0.6f).scaleY(0.6f)
+            }
+
+            BubbleAnimationStyle.Fade -> {
+                animation.alpha(0f)
+            }
+
+            BubbleAnimationStyle.Rotate -> {
+                animation.alpha(0f).rotation(-35f)
+            }
+        }
+
+        animation.start()
     }
 
     private fun shouldIgnoreForegroundTaskVolumeKeys(): Boolean {

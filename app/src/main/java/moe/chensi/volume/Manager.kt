@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import moe.chensi.volume.data.App
+import moe.chensi.volume.data.BubbleAnimationStyle
 import moe.chensi.volume.data.BubblePreferences
 import moe.chensi.volume.data.AppPreferencesStore
 import moe.chensi.volume.system.AudioPlaybackConfigurationProxy
@@ -199,6 +200,26 @@ class Manager(context: Context, dataStore: DataStore<Preferences>) {
 
     fun setBubbleShadowEnabled(enabled: Boolean) {
         val next = _bubblePreferences.copy(shadowEnabled = enabled)
+        if (next == _bubblePreferences) {
+            return
+        }
+
+        _bubblePreferences = next
+        appPreferencesStore.setBubble(next)
+    }
+
+    fun setBubbleCloseDelayMs(value: Long) {
+        val next = _bubblePreferences.copy(closeDelayMs = value.coerceIn(300L, 15000L))
+        if (next == _bubblePreferences) {
+            return
+        }
+
+        _bubblePreferences = next
+        appPreferencesStore.setBubble(next)
+    }
+
+    fun setBubbleAnimationStyle(value: BubbleAnimationStyle) {
+        val next = _bubblePreferences.copy(animationStyle = value)
         if (next == _bubblePreferences) {
             return
         }
