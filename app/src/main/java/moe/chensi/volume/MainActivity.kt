@@ -44,6 +44,7 @@ import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -169,6 +170,18 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(manager.shizukuStatus) {
                 if (manager.shizukuStatus != Manager.ShizukuStatus.Connected) {
                     currentPage = Page.Main
+                }
+            }
+
+            LaunchedEffect(currentPage, manager.shizukuStatus) {
+                val enableBubblePreview =
+                    manager.shizukuStatus == Manager.ShizukuStatus.Connected && currentPage == Page.BubbleSettings
+                setBubblePreviewMode(enableBubblePreview)
+            }
+
+            DisposableEffect(Unit) {
+                onDispose {
+                    setBubblePreviewMode(false)
                 }
             }
 
@@ -348,12 +361,17 @@ class MainActivity : ComponentActivity() {
                                         sizeScale = bubblePreferences.sizeScale,
                                         horizontal = bubblePreferences.horizontal,
                                         vertical = bubblePreferences.vertical,
+                                        shadowEnabled = bubblePreferences.shadowEnabled,
                                         onSizeScaleChange = {
                                             manager.setBubbleSizeScale(it)
                                             notifyBubbleSettingsChanged()
                                         },
                                         onPositionChange = { horizontal, vertical ->
                                             manager.setBubblePosition(horizontal, vertical)
+                                            notifyBubbleSettingsChanged()
+                                        },
+                                        onShadowEnabledChange = {
+                                            manager.setBubbleShadowEnabled(it)
                                             notifyBubbleSettingsChanged()
                                         }
                                     )
@@ -396,6 +414,14 @@ class MainActivity : ComponentActivity() {
 
     private fun notifyBubbleSettingsChanged() {
         sendBroadcast(Intent(Service.ACTION_BUBBLE_SETTINGS_CHANGED).setPackage(packageName))
+    }
+
+    private fun setBubblePreviewMode(enabled: Boolean) {
+        sendBroadcast(
+            Intent(Service.ACTION_BUBBLE_PREVIEW_MODE)
+                .setPackage(packageName)
+                .putExtra(Service.EXTRA_BUBBLE_PREVIEW_ENABLED, enabled)
+        )
     }
 
     @Composable

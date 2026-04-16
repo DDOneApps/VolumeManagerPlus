@@ -14,5 +14,6 @@ data class AppPreferences(
 data class BubblePreferences(
     var sizeScale: Float = 1.0f,
     var horizontal: Float = 0.90f,
-    var vertical: Float = 0.50f
+    var vertical: Float = 0.50f,
+    var shadowEnabled: Boolean = true
 )

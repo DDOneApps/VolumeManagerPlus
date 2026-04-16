@@ -51,6 +51,7 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import moe.chensi.volume.bubble.BUBBLE_SHADOW_PADDING_DP
 import moe.chensi.volume.bubble.calculateBubbleLayout
 import moe.chensi.volume.compose.AppVolumeList
 import moe.chensi.volume.compose.StreamVolumeSlider
@@ -58,12 +59,15 @@ import moe.chensi.volume.system.ActivityTaskManagerProxy
 import moe.chensi.volume.ui.theme.VolumeManagerTheme
 import org.joor.Reflect
 import java.util.Objects
+import kotlin.math.roundToInt
 
 @SuppressLint("AccessibilityPolicy")
 class Service : AccessibilityService() {
     companion object {
         const val ACTION_SHOW_VIEW = "moe.chensi.volume.ACTION_SHOW_VIEW"
         const val ACTION_BUBBLE_SETTINGS_CHANGED = "moe.chensi.volume.ACTION_BUBBLE_SETTINGS_CHANGED"
+        const val ACTION_BUBBLE_PREVIEW_MODE = "moe.chensi.volume.ACTION_BUBBLE_PREVIEW_MODE"
+        const val EXTRA_BUBBLE_PREVIEW_ENABLED = "moe.chensi.volume.EXTRA_BUBBLE_PREVIEW_ENABLED"
 
         private const val TAG = "VolumeManager.Service"
         private const val VOLUME_CHANGED_ACTION = "android.media.VOLUME_CHANGED_ACTION"
@@ -90,6 +94,7 @@ class Service : AccessibilityService() {
     private var bubbleView: View? = null
     private var bubbleVisible = false
     private var bubbleLifecycle: LifecycleRegistry? = null
+    private var bubblePreviewModeEnabled = false
 
     private val overlayLayoutParams by lazy {
         WindowManager.LayoutParams(
@@ -220,24 +225,35 @@ class Service : AccessibilityService() {
 
             @Composable
             override fun Content() {
+                val preferences = manager.bubblePreferences
+                val shadowEnabled = preferences.shadowEnabled
+                val bubblePadding = if (shadowEnabled) BUBBLE_SHADOW_PADDING_DP.dp else 0.dp
+
                 VolumeManagerTheme {
-                    Surface(
-                        shape = CircleShape,
-                        color = androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
-                        shadowElevation = 8.dp,
-                        tonalElevation = 4.dp,
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .clickable {
-                                showOverlay()
-                            }
+                            .padding(bubblePadding),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Tune,
-                                contentDescription = "Open volume manager"
-                            )
+                        Surface(
+                            shape = CircleShape,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
+                            shadowElevation = if (shadowEnabled) 8.dp else 0.dp,
+                            tonalElevation = if (shadowEnabled) 4.dp else 0.dp,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable {
+                                    showOverlay()
+                                }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Tune,
+                                    contentDescription = "Open volume manager"
+                                )
+                            }
                         }
                     }
                 }
@@ -282,6 +298,11 @@ class Service : AccessibilityService() {
     }
 
     private fun startBubbleIdleTimer() {
+        if (bubblePreviewModeEnabled) {
+            mainHandler.removeCallbacks(hideBubbleRunnable)
+            return
+        }
+
         mainHandler.removeCallbacks(hideBubbleRunnable)
         mainHandler.postDelayed(hideBubbleRunnable, BUBBLE_IDLE_TIMEOUT)
     }
@@ -324,6 +345,9 @@ class Service : AccessibilityService() {
             } finally {
                 overlayView = null
                 overlayLifecycle = null
+                if (bubblePreviewModeEnabled) {
+                    showBubble()
+                }
             }
         }
     }
@@ -332,6 +356,11 @@ class Service : AccessibilityService() {
         val preferences = manager.bubblePreferences
         val width = resources.displayMetrics.widthPixels
         val height = resources.displayMetrics.heightPixels
+        val shadowPaddingPx = if (preferences.shadowEnabled) {
+            (resources.displayMetrics.density * BUBBLE_SHADOW_PADDING_DP).roundToInt()
+        } else {
+            0
+        }
         val layout = calculateBubbleLayout(
             widthPx = width,
             heightPx = height,
@@ -340,10 +369,14 @@ class Service : AccessibilityService() {
             horizontal = preferences.horizontal,
             vertical = preferences.vertical
         )
-        bubbleLayoutParams.width = layout.sizePx
-        bubbleLayoutParams.height = layout.sizePx
-        bubbleLayoutParams.x = layout.xPx
-        bubbleLayoutParams.y = layout.yPx
+        val windowWidth = layout.sizePx + shadowPaddingPx * 2
+        val windowHeight = layout.sizePx + shadowPaddingPx * 2
+        bubbleLayoutParams.width = windowWidth
+        bubbleLayoutParams.height = windowHeight
+        bubbleLayoutParams.x =
+            (layout.xPx - shadowPaddingPx).coerceIn(0, (width - windowWidth).coerceAtLeast(0))
+        bubbleLayoutParams.y =
+            (layout.yPx - shadowPaddingPx).coerceIn(0, (height - windowHeight).coerceAtLeast(0))
 
         val target = bubbleView
         if (target != null) {
@@ -420,7 +453,21 @@ class Service : AccessibilityService() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 ACTION_SHOW_VIEW -> showOverlay()
-                ACTION_BUBBLE_SETTINGS_CHANGED -> updateBubbleLayout()
+                ACTION_BUBBLE_SETTINGS_CHANGED -> {
+                    updateBubbleLayout()
+                    if (bubblePreviewModeEnabled && !overlayVisible) {
+                        showBubble()
+                    }
+                }
+                ACTION_BUBBLE_PREVIEW_MODE -> {
+                    bubblePreviewModeEnabled =
+                        intent.getBooleanExtra(EXTRA_BUBBLE_PREVIEW_ENABLED, false)
+                    if (bubblePreviewModeEnabled && !overlayVisible) {
+                        showBubble()
+                    } else if (!bubblePreviewModeEnabled) {
+                        hideBubble()
+                    }
+                }
                 VOLUME_CHANGED_ACTION -> if (bubbleVisible) startBubbleIdleTimer()
             }
         }
@@ -437,6 +484,7 @@ class Service : AccessibilityService() {
         val filter = IntentFilter().apply {
             addAction(ACTION_SHOW_VIEW)
             addAction(ACTION_BUBBLE_SETTINGS_CHANGED)
+            addAction(ACTION_BUBBLE_PREVIEW_MODE)
             addAction(VOLUME_CHANGED_ACTION)
         }
         registerReceiver(broadcastReceiver, filter, RECEIVER_NOT_EXPORTED)
