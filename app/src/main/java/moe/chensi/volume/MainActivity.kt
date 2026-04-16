@@ -16,9 +16,18 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,12 +56,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -60,6 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.collect
 import moe.chensi.volume.compose.AppVolumeList
 import moe.chensi.volume.compose.BubbleSettingsCard
 import moe.chensi.volume.compose.CrashReportDialog
@@ -75,6 +88,7 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "VolumeManager.Activity"
 
         private const val SERVICE_NAME_SEPARATOR = ":"
+        private const val ACCESSIBILITY_BUTTON_TARGETS_KEY = "accessibility_button_targets"
     }
 
     private enum class Page {
@@ -135,6 +149,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun disableAccessibilityButtonShortcut(name: String) {
+        val value = Settings.Secure.getString(
+            contentResolver, ACCESSIBILITY_BUTTON_TARGETS_KEY
+        ) ?: return
+        if (value.isBlank()) {
+            return
+        }
+
+        val updated = value.split(SERVICE_NAME_SEPARATOR)
+            .filter { it.isNotBlank() && it != name }
+            .joinToString(SERVICE_NAME_SEPARATOR)
+
+        if (updated != value) {
+            Settings.Secure.putString(
+                contentResolver, ACCESSIBILITY_BUTTON_TARGETS_KEY, updated
+            )
+        }
+    }
+
     val powerManager by lazy { getSystemService(PowerManager::class.java)!! }
     var isIgnoringBatteryOptimization by mutableStateOf(false)
     private fun checkBatteryOptimization() {
@@ -160,6 +193,7 @@ class MainActivity : ComponentActivity() {
             var showAll by remember { mutableStateOf(false) }
             var crashReport by remember { mutableStateOf<String?>(null) }
             var currentPage by rememberSaveable { mutableStateOf(Page.Main) }
+            var predictiveBackProgress by remember { mutableFloatStateOf(0f) }
 
             LaunchedEffect(showCrashReport) {
                 if (showCrashReport) {
@@ -182,6 +216,26 @@ class MainActivity : ComponentActivity() {
             DisposableEffect(Unit) {
                 onDispose {
                     setBubblePreviewMode(false)
+                }
+            }
+
+            BackHandler(
+                enabled = Build.VERSION.SDK_INT < 34 && manager.shizukuStatus == Manager.ShizukuStatus.Connected && currentPage == Page.BubbleSettings
+            ) {
+                currentPage = Page.Main
+            }
+
+            PredictiveBackHandler(
+                enabled = manager.shizukuStatus == Manager.ShizukuStatus.Connected && currentPage == Page.BubbleSettings
+            ) { progress ->
+                try {
+                    progress.collect { event ->
+                        predictiveBackProgress = event.progress
+                    }
+                    currentPage = Page.Main
+                } catch (_: CancellationException) {
+                } finally {
+                    predictiveBackProgress = 0f
                 }
             }
 
@@ -214,7 +268,7 @@ class MainActivity : ComponentActivity() {
                                     if (currentPage == Page.BubbleSettings) {
                                         "Bubble settings"
                                     } else {
-                                        "Volume Manager"
+                                        stringResource(R.string.app_name)
                                     }
                                 )
                             },
@@ -355,45 +409,69 @@ class MainActivity : ComponentActivity() {
                             Manager.ShizukuStatus.Connected -> {
                                 ServiceStatus()
 
-                                if (currentPage == Page.BubbleSettings) {
-                                    val bubblePreferences = manager.bubblePreferences
-                                    BubbleSettingsCard(
-                                        sizeScale = bubblePreferences.sizeScale,
-                                        horizontal = bubblePreferences.horizontal,
-                                        vertical = bubblePreferences.vertical,
-                                        shadowEnabled = bubblePreferences.shadowEnabled,
-                                        closeDelayMs = bubblePreferences.closeDelayMs,
-                                        animationStyle = bubblePreferences.animationStyle,
-                                        onSizeScaleChange = {
-                                            manager.setBubbleSizeScale(it)
-                                            notifyBubbleSettingsChanged()
-                                        },
-                                        onPositionChange = { horizontal, vertical ->
-                                            manager.setBubblePosition(horizontal, vertical)
-                                            notifyBubbleSettingsChanged()
-                                        },
-                                        onShadowEnabledChange = {
-                                            manager.setBubbleShadowEnabled(it)
-                                            notifyBubbleSettingsChanged()
-                                        },
-                                        onCloseDelayChange = {
-                                            manager.setBubbleCloseDelayMs(it)
-                                            notifyBubbleSettingsChanged()
-                                        },
-                                        onAnimationStyleChange = {
-                                            manager.setBubbleAnimationStyle(it)
-                                            notifyBubbleSettingsChanged()
+                                AnimatedContent(
+                                    targetState = currentPage,
+                                    modifier = Modifier.weight(1f),
+                                    transitionSpec = {
+                                        if (targetState == Page.BubbleSettings) {
+                                            (slideInHorizontally { it / 5 } + fadeIn()) togetherWith
+                                                    (slideOutHorizontally { -it / 5 } + fadeOut())
+                                        } else {
+                                            (slideInHorizontally { -it / 5 } + fadeIn()) togetherWith
+                                                    (slideOutHorizontally { it / 5 } + fadeOut())
                                         }
-                                    )
-                                } else {
-                                    AppVolumeList(
-                                        modifier = Modifier.weight(1f),
-                                        contentPadding = PaddingValues(bottom = 16.dp),
-                                        apps = manager.apps.values,
-                                        showEmpty = true,
-                                        showAll = showAll,
-                                        onShowAll = { showAll = true }
-                                    )
+                                    },
+                                    label = "MainPageTransition"
+                                ) { page ->
+                                    if (page == Page.BubbleSettings) {
+                                        val bubblePreferences = manager.bubblePreferences
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .graphicsLayer {
+                                                    translationX = predictiveBackProgress * 72f
+                                                    alpha = 1f - predictiveBackProgress * 0.08f
+                                                }
+                                        ) {
+                                            BubbleSettingsCard(
+                                                sizeScale = bubblePreferences.sizeScale,
+                                                horizontal = bubblePreferences.horizontal,
+                                                vertical = bubblePreferences.vertical,
+                                                shadowEnabled = bubblePreferences.shadowEnabled,
+                                                closeDelayMs = bubblePreferences.closeDelayMs,
+                                                animationStyle = bubblePreferences.animationStyle,
+                                                onSizeScaleChange = {
+                                                    manager.setBubbleSizeScale(it)
+                                                    notifyBubbleSettingsChanged()
+                                                },
+                                                onPositionChange = { horizontal, vertical ->
+                                                    manager.setBubblePosition(horizontal, vertical)
+                                                    notifyBubbleSettingsChanged()
+                                                },
+                                                onShadowEnabledChange = {
+                                                    manager.setBubbleShadowEnabled(it)
+                                                    notifyBubbleSettingsChanged()
+                                                },
+                                                onCloseDelayChange = {
+                                                    manager.setBubbleCloseDelayMs(it)
+                                                    notifyBubbleSettingsChanged()
+                                                },
+                                                onAnimationStyleChange = {
+                                                    manager.setBubbleAnimationStyle(it)
+                                                    notifyBubbleSettingsChanged()
+                                                }
+                                            )
+                                        }
+                                    } else {
+                                        AppVolumeList(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentPadding = PaddingValues(bottom = 16.dp),
+                                            apps = manager.apps.values,
+                                            showEmpty = true,
+                                            showAll = showAll,
+                                            onShowAll = { showAll = true }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -451,9 +529,10 @@ class MainActivity : ComponentActivity() {
             }
 
             try {
-                enableAccessibilityService(
+                val serviceName =
                     ComponentName(this@MainActivity, Service::class.java).flattenToString()
-                )
+                enableAccessibilityService(serviceName)
+                disableAccessibilityButtonShortcut(serviceName)
                 serviceEnabled = true
             } catch (e: Exception) {
                 Log.e(TAG, "Can't enable accessibility service", e)

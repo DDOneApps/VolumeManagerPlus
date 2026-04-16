@@ -318,7 +318,7 @@ class Service : AccessibilityService() {
 
         if (!overlayVisible) {
             overlayVisible = true
-            animateIn(overlayView!!)
+            animateOverlayIn(overlayView!!)
         }
 
         startOverlayIdleTimer()
@@ -333,9 +333,9 @@ class Service : AccessibilityService() {
         mainHandler.removeCallbacks(hideOverlayRunnable)
 
         val target = overlayView ?: return
-        animateOut(target) {
+        animateOverlayOut(target) {
             if (overlayVisible) {
-                return@animateOut
+                return@animateOverlayOut
             }
 
             try {
@@ -351,6 +351,34 @@ class Service : AccessibilityService() {
                 }
             }
         }
+    }
+
+    private fun animateOverlayIn(view: View) {
+        view.animate().cancel()
+        view.alpha = 0f
+        view.translationY = 16f * resources.displayMetrics.density
+        view.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(ANIMATION_DURATION)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .setListener(null)
+            .start()
+    }
+
+    private fun animateOverlayOut(view: View, onEnd: () -> Unit) {
+        view.animate().cancel()
+        view.animate()
+            .alpha(0f)
+            .translationY(16f * resources.displayMetrics.density)
+            .setDuration(ANIMATION_DURATION)
+            .setInterpolator(AccelerateDecelerateInterpolator())
+            .setListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    onEnd()
+                }
+            })
+            .start()
     }
 
     private fun updateBubbleLayout() {

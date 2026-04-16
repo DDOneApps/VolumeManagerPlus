@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">AppVolMgr</string>
+    <string name="app_name">VolumeManagerPlus</string>
     <string name="accessibility_service_description">Keep app volume manager (AppVolMgr) running in background, and provide quick access to it via accessibility button or physical volume button.</string>
     <string name="group_active">Active</string>
     <string name="group_inactive">Inactive</string>
