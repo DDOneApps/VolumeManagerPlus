@@ -6,11 +6,16 @@ import android.accessibilityservice.AccessibilityService
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.annotation.SuppressLint
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
@@ -78,6 +83,8 @@ class Service : AccessibilityService() {
 
         private const val OVERLAY_IDLE_TIMEOUT = 5000L
         private const val ANIMATION_DURATION = 220L
+        private const val NOTIFICATION_CHANNEL_ID = "service"
+        private const val NOTIFICATION_ID = 1
     }
 
     private val windowManager: WindowManager by lazy {
@@ -663,6 +670,8 @@ class Service : AccessibilityService() {
     override fun onServiceConnected() {
         Log.i(TAG, "onServiceConnected")
 
+        startForegroundNotification()
+
         val application = super.getApplication() as MyApplication
         manager = application.manager
         val serviceName = ComponentName(this, Service::class.java).flattenToString()
@@ -683,6 +692,47 @@ class Service : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {}
 
+    private fun startForegroundNotification() {
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.createNotificationChannel(
+            NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                getString(R.string.foreground_notification_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = getString(R.string.foreground_notification_channel_description)
+                setShowBadge(false)
+            }
+        )
+
+        val notification = Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setContentTitle(getString(R.string.foreground_notification_title))
+            .setContentText(getString(R.string.foreground_notification_text))
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, MainActivity::class.java),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+            )
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
     override fun onInterrupt() {
         Log.i(TAG, "onInterrupt")
     }
@@ -691,6 +741,7 @@ class Service : AccessibilityService() {
         super.onDestroy()
 
         Log.i(TAG, "onDestroy")
+        stopForeground(STOP_FOREGROUND_REMOVE)
         Toast.makeText(this, "Accessibility service died!", Toast.LENGTH_SHORT).show()
 
         mainHandler.removeCallbacks(hideOverlayRunnable)
