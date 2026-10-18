@@ -742,7 +742,7 @@ class Service : AccessibilityService() {
 
         Log.i(TAG, "onDestroy")
         stopForeground(STOP_FOREGROUND_REMOVE)
-        Toast.makeText(this, "Accessibility service died!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, R.string.accessibility_service_died, Toast.LENGTH_SHORT).show()
 
         mainHandler.removeCallbacks(hideOverlayRunnable)
         mainHandler.removeCallbacks(hideBubbleRunnable)
