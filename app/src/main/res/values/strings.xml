@@ -1,6 +1,7 @@
 <resources>
     <string name="app_name">VolumeManagerPlus</string>
     <string name="accessibility_service_description">Keep app volume manager (AppVolMgr) running in background, and provide quick access to it via accessibility button or physical volume button.</string>
+    <string name="quick_settings_tile">Volume Manager</string>
     <string name="foreground_notification_channel_name">Background service</string>
     <string name="foreground_notification_channel_description">Keeps AppVolMgr available while running in the background.</string>
     <string name="foreground_notification_title">AppVolMgr is running</string>
