@@ -18,8 +18,10 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -72,8 +74,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import moe.chensi.volume.compose.AboutDialog
 import moe.chensi.volume.compose.AppVolumeList
 import moe.chensi.volume.compose.BubbleSettingsCard
@@ -84,6 +89,7 @@ import moe.chensi.volume.ui.theme.VolumeManagerTheme
 import org.joor.Reflect
 import rikka.shizuku.Shizuku
 import rikka.shizuku.ShizukuRemoteProcess
+import kotlin.time.Duration.Companion.milliseconds
 
 @SuppressLint("PrivateApi", "SoonBlockedPrivateApi")
 class MainActivity : ComponentActivity() {
@@ -380,10 +386,10 @@ class MainActivity : ComponentActivity() {
                                         16.dp, Alignment.CenterVertically
                                     )
                                 ) {
-                                    Text("Shizuku not installed")
+                                    Text(stringResource(R.string.shizuku_not_installed))
                                     Text(
                                         textAlign = TextAlign.Center,
-                                        text = "Please install Shizuku from the Play Store or GitHub"
+                                        text = stringResource(R.string.shizuku_install_prompt)
                                     )
                                     Button(
                                         onClick = {
@@ -394,7 +400,7 @@ class MainActivity : ComponentActivity() {
                                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                             context.startActivity(intent)
                                         }) {
-                                        Text("Get Shizuku on Play Store")
+                                        Text(stringResource(R.string.shizuku_play_store))
                                     }
                                     Button(
                                         onClick = {
@@ -405,7 +411,7 @@ class MainActivity : ComponentActivity() {
                                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                                             context.startActivity(intent)
                                         }) {
-                                        Text("Get Shizuku on GitHub")
+                                        Text(stringResource(R.string.shizuku_github))
                                     }
                                 }
                             }
@@ -417,11 +423,29 @@ class MainActivity : ComponentActivity() {
                                     16.dp, Alignment.CenterVertically
                                 )
                             ) {
-                                Text("Waiting for Shizuku...")
+                                Text(stringResource(R.string.shizuku_waiting))
                                 Text(
                                     textAlign = TextAlign.Center,
-                                    text = "Make sure Shizuku is installed and enabled"
+                                    text = stringResource(R.string.shizuku_enable_prompt)
                                 )
+                                Button(
+                                    onClick = {
+                                        val launchIntent = packageManager.getLaunchIntentForPackage(
+                                            Manager.SHIZUKU_PACKAGE_NAME
+                                        )
+                                        if (launchIntent != null) {
+                                            startActivity(launchIntent)
+                                        } else {
+                                            Toast.makeText(
+                                                this@MainActivity,
+                                                getString(R.string.shizuku_unable_to_open),
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                ) {
+                                    Text(stringResource(R.string.shizuku_open))
+                                }
                             }
 
                             Manager.ShizukuStatus.PermissionDenied -> Column(
@@ -431,14 +455,14 @@ class MainActivity : ComponentActivity() {
                                     16.dp, Alignment.CenterVertically
                                 )
                             ) {
-                                Text("Shizuku is installed and enabled")
+                                Text(stringResource(R.string.shizuku_enabled))
                                 Text(
                                     textAlign = TextAlign.Center,
-                                    text = "Allow App Volume Manager to access Shizuku?"
+                                    text = stringResource(R.string.shizuku_permission_prompt)
                                 )
 
                                 Button(onClick = { Shizuku.requestPermission(0) }) {
-                                    Text(text = "Request permission")
+                                    Text(text = stringResource(R.string.request_permission))
                                 }
                             }
 
@@ -540,14 +564,10 @@ class MainActivity : ComponentActivity() {
     data class ErrorInfo(val message: String, val stack: String)
 
     @SuppressLint("BatteryLife")
-    fun openBatterySettings() {
-        val intent = Intent(
-            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-            Uri.fromParts("package", applicationInfo.packageName, null)
-        )
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
-    }
+    private fun createBatteryOptimizationSettingsIntent() = Intent(
+        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+        Uri.fromParts("package", applicationInfo.packageName, null)
+    )
 
     private fun notifyBubbleSettingsChanged() {
         sendBroadcast(Intent(Service.ACTION_BUBBLE_SETTINGS_CHANGED).setPackage(packageName))
@@ -566,6 +586,15 @@ class MainActivity : ComponentActivity() {
         var permissionGranted by remember { mutableStateOf(false) }
         var serviceEnabled by remember { mutableStateOf(false) }
         var errorInfo by remember { mutableStateOf<ErrorInfo?>(null) }
+        val batterySettingsLauncher = rememberLauncherForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) {
+            checkBatteryOptimization()
+            lifecycleScope.launch {
+                delay(2_000.milliseconds)
+                checkBatteryOptimization()
+            }
+        }
 
         LaunchedEffect(0) {
             try {
@@ -593,21 +622,25 @@ class MainActivity : ComponentActivity() {
 
             AlertDialog(
                 onDismissRequest = { errorInfo = null },
-                title = { Text("Can't add permission") },
+                title = { Text(stringResource(R.string.unable_to_add_permission)) },
                 text = { Text(info.message) },
                 confirmButton = {
                     Button(onClick = { errorInfo = null }) {
-                        Text("OK")
+                        Text(stringResource(R.string.ok))
                     }
                 },
                 dismissButton = {
                     TextButton(onClick = {
                         val clipboard = context.getSystemService(ClipboardManager::class.java)
-                        val clip = ClipData.newPlainText("error_message", info.stack)
+                        val clip = ClipData.newPlainText(
+                            getString(R.string.error_message_clipboard_label), info.stack
+                        )
                         clipboard.setPrimaryClip(clip)
-                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context, R.string.copied_to_clipboard, Toast.LENGTH_SHORT
+                        ).show()
                     }) {
-                        Text("Copy full message")
+                        Text(stringResource(R.string.copy_full_message))
                     }
                 })
         }
@@ -620,8 +653,12 @@ class MainActivity : ComponentActivity() {
         Log.i(TAG, "Manufacturer: ${Build.MANUFACTURER}")
 
         if (!isIgnoringBatteryOptimization) {
-            Button(onClick = { openBatterySettings() }) {
-                Text(text = "Disable battery optimization")
+            Button(
+                onClick = {
+                    batterySettingsLauncher.launch(createBatteryOptimizationSettingsIntent())
+                }
+            ) {
+                Text(text = stringResource(R.string.disable_battery_optimization))
             }
         }
     }

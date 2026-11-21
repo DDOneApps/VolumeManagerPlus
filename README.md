@@ -2,8 +2,9 @@
 
 [<img src="https://img.shields.io/f-droid/v/moe.chensi.volume?baseUrl=https://apt.izzysoft.de/fdroid&label=IzzyOnDroid" alt="IzzyOnDroid">](https://apt.izzysoft.de/fdroid/index/apk/moe.chensi.volume)
 [<img src="https://shields.rbtlog.dev/simple/moe.chensi.volume" alt="RB shield">](https://shields.rbtlog.dev/moe.chensi.volume)
-
-**Work in progress**
+<a href="https://tangoadb.dev/discord">
+    <img alt="Discord" src="https://img.shields.io/discord/1120215514732564502?logo=discord&logoColor=%23ffffff&label=Discord">
+</a>
 
 Control each app's volume independently. [Shizuku](https://shizuku.rikka.app/) is used to access privileged APIs.
 
@@ -25,10 +26,10 @@ Some hand-picked versions can also be downloaded from [releases](https://github.
 1. Install and enable [Shizuku](https://shizuku.rikka.app/)
 2. Launch Volume Manager and request Shizuku permission
 3. It should automatically enable its accessibility service
-4. You can change volume either from
+4. You can change apps' volume from
    1. The main interface
-   2. Press any volume button and a popup should appear, completely replace the default volume popup
-   3. Enable accessibility button and click the button
+   2. Press any volume button; the system slider stays visible and a customizable quick bubble appears. Volume-button handling can be switched off per app or globally in settings.
+   3. Add the Quick Settings tile; tap it to open the popup or long-press it to open the main interface
 
 ## Compare to [SoundMaster from ShizuTools](https://github.com/legendsayantan/ShizuTools/wiki/SoundMaster)
 
