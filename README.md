@@ -28,9 +28,8 @@ Some hand-picked versions can also be downloaded from [releases](https://github.
 3. It should automatically enable its accessibility service
 4. You can change apps' volume from
    1. The main interface
-   2. Press any volume button (enabled by default, can be switched off per app or globally in settings)
-   3. Floating button (disabled by default, can be switched on in settings)
-   4. Add the Quick Settings tile; tap it to open the popup or long-press it to open the main interface
+   2. Press any volume button; the system slider stays visible and a customizable quick bubble appears. Volume-button handling can be switched off per app or globally in settings.
+   3. Add the Quick Settings tile; tap it to open the popup or long-press it to open the main interface
 
 ## Compare to [SoundMaster from ShizuTools](https://github.com/legendsayantan/ShizuTools/wiki/SoundMaster)
 
